@@ -88,6 +88,19 @@ fn run() -> std::io::Result<()> {
     surf.fill_rect(0, 0, SCREEN_W, SCREEN_H, WHITE);
     disp.update_all(surf.w, surf.h);
 
+    // Warm the oracle now: pi loads Node + extensions + codex auth ONCE here,
+    // while you're still picking up the pen, so replies pay only model latency.
+    let oracle = match oracle::Oracle::spawn() {
+        Ok(o) => {
+            eprintln!("riddle: oracle warming (pi rpc)");
+            Some(o)
+        }
+        Err(e) => {
+            eprintln!("riddle: oracle spawn failed: {e}");
+            None
+        }
+    };
+
     let mut user_ink = ink::Ink::new();
     let mut state = State::Listening { last_pen: None };
     let mut pen_down = false;
@@ -214,7 +227,11 @@ fn run() -> std::io::Result<()> {
                     if stage + 1 >= STAGES {
                         user_ink.clear();
                         let (tx, rx) = mpsc::channel();
-                        oracle::ask(PNG_PATH.to_string(), tx);
+                        if let Some(ref o) = oracle {
+                            o.ask(PNG_PATH, tx);
+                        } else {
+                            let _ = tx.send(Err("no oracle".into()));
+                        }
                         State::Thinking { rx, pulse: Instant::now(), blot_on: false }
                     } else {
                         State::Drinking { stage: stage + 1, next: Instant::now() + Duration::from_millis(70), region }
