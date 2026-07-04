@@ -17,5 +17,5 @@ rm -f /tmp/epframebuffer.lock
 sleep 1
 
 cd "$(dirname "$APP")"
-LD_LIBRARY_PATH=/home/root/quill "$APP"
+LD_LIBRARY_PATH=/home/root/quill:/usr/lib/plugins/scenegraph "$APP"
 echo "takeover: app exited ($?), restoring xochitl"

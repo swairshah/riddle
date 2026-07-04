@@ -31,12 +31,15 @@ extern void quill_process_events(void);
 #define ABS_X 0
 #define ABS_Y 1
 #define ABS_PRESSURE 24
+#define ABS_MT_SLOT 47
+#define ABS_MT_TRACKING_ID 57
 #define BTN_TOOL_PEN 320
 #define BTN_TOOL_RUBBER 321
 #define BTN_STYLUS 331
 #define BTN_TOUCH 330
 #define KEY_POWER 116
 #define EVIOCGRAB 0x40044590
+#define MAX_SLOTS 16
 
 #define DIGI_MAX_X 11180
 #define DIGI_MAX_Y 15340
@@ -122,10 +125,15 @@ int main(void) {
 
     int pen_fd = open_input("marker");
     int pwr_fd = open_input("powerkey");
+    int touch_fd = open_input("touch");
     if (pen_fd < 0) {
         fprintf(stderr, "scribble: no pen!\n");
         return 1;
     }
+
+    // 5-finger tap = exit (no side button on the base Marker).
+    int slot_active[MAX_SLOTS] = {0};
+    int cur_slot = 0;
 
     int rx = 0, ry = 0, pressure = 0, touching = 0, eraser = 0, side_btn = 0;
     int lx = -1, ly = -1;
@@ -134,13 +142,14 @@ int main(void) {
     int dx0 = 1 << 30, dy0 = 1 << 30, dx1 = -1, dy1 = -1;
     struct timeval last_flush = {0, 0};
 
-    struct pollfd pfds[2] = {
+    struct pollfd pfds[3] = {
         {.fd = pen_fd, .events = POLLIN},
         {.fd = pwr_fd, .events = POLLIN},
+        {.fd = touch_fd, .events = POLLIN},
     };
 
     while (!g_quit) {
-        poll(pfds, pwr_fd >= 0 ? 2 : 1, 5);
+        poll(pfds, 3, 5);
         struct input_event evs[64];
 
         if (pwr_fd >= 0) {
@@ -148,6 +157,22 @@ int main(void) {
             for (int i = 0; i < (int)(n / sizeof(struct input_event)); i++)
                 if (evs[i].type == EV_KEY && evs[i].code == KEY_POWER && evs[i].value == 1)
                     g_quit = 1;
+        }
+
+        if (touch_fd >= 0) {
+            ssize_t n = read(touch_fd, evs, sizeof evs);
+            for (int i = 0; i < (int)(n / sizeof(struct input_event)); i++) {
+                struct input_event *e = &evs[i];
+                if (e->type == EV_ABS && e->code == ABS_MT_SLOT) {
+                    cur_slot = e->value;
+                    if (cur_slot < 0 || cur_slot >= MAX_SLOTS) cur_slot = 0;
+                } else if (e->type == EV_ABS && e->code == ABS_MT_TRACKING_ID) {
+                    slot_active[cur_slot] = (e->value != -1);
+                    int fingers = 0;
+                    for (int s = 0; s < MAX_SLOTS; s++) fingers += slot_active[s];
+                    if (fingers >= 5) g_quit = 1;
+                }
+            }
         }
 
         ssize_t n = read(pen_fd, evs, sizeof evs);
