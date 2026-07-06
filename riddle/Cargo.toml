@@ -17,6 +17,9 @@ ureq = { version = "2.10", default-features = false, features = ["tls"] }
 [features]
 # Link libquill.so (vendor e-ink engine C ABI) for full-takeover mode.
 takeover = []
+# reMarkable 2: 1404x1872, 32-bit xochitl (qtfb payload offsets), Wacom pen.
+# Windowed qtfb mode only — the takeover engine is Paper Pro vendor code.
+rm2 = []
 
 [profile.release]
 strip = true

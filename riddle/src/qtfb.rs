@@ -20,7 +20,20 @@ pub const UPDATE_ALL: i32 = 0;
 pub const UPDATE_PARTIAL: i32 = 1;
 
 /// FBFMT_RMPP_RGB565: native 1620x2160, 2 bytes/pixel, stride = 3240.
+#[allow(dead_code)]
 pub const FBFMT_RMPP_RGB565: u8 = 3;
+/// FBFMT_RM2FB: native 1404x1872, RGB565, 2 bytes/pixel, stride = 2808.
+#[allow(dead_code)]
+pub const FBFMT_RM2FB: u8 = 0;
+
+// ServerMessage layout depends on the ABI of the xochitl the server runs in:
+// on 64-bit devices the payload union is 8-aligned (size_t in the init reply),
+// on the 32-bit rM2 xochitl everything is 4-aligned. ClientMessage holds only
+// ints, so its layout (payload @4, 24 bytes) is the same on both.
+#[cfg(not(feature = "rm2"))]
+const SRV_PAYLOAD: usize = 8;
+#[cfg(feature = "rm2")]
+const SRV_PAYLOAD: usize = 4;
 
 #[allow(dead_code)]
 pub const REFRESH_MODE_UFAST: i32 = 0;
@@ -96,8 +109,9 @@ impl QtfbClient {
         msg[8] = format;
         send_all(fd, &msg)?;
 
-        // Init reply: shmKey i32 @8, shmSize u64 @16. Server closing without
-        // replying (recv == 0) means init was rejected.
+        // Init reply: shmKey i32, then size_t shmSize at the next size_t
+        // boundary. Server closing without replying (recv == 0) means init
+        // was rejected.
         let mut reply = [0u8; 32];
         let n = unsafe { libc::recv(fd, reply.as_mut_ptr() as *mut libc::c_void, 32, 0) };
         if n <= 0 {
@@ -107,8 +121,11 @@ impl QtfbClient {
                 "qtfb server rejected init (no reply)",
             ));
         }
-        let shm_key = i32::from_le_bytes(reply[8..12].try_into().unwrap());
+        let shm_key = i32::from_le_bytes(reply[SRV_PAYLOAD..SRV_PAYLOAD + 4].try_into().unwrap());
+        #[cfg(not(feature = "rm2"))]
         let shm_size = u64::from_le_bytes(reply[16..24].try_into().unwrap()) as usize;
+        #[cfg(feature = "rm2")]
+        let shm_size = u32::from_le_bytes(reply[8..12].try_into().unwrap()) as usize;
 
         let shm_path = format!("/dev/shm/qtfb_{}\0", shm_key);
         let shm_fd = unsafe { libc::open(shm_path.as_ptr() as *const libc::c_char, libc::O_RDWR) };
@@ -232,13 +249,14 @@ impl QtfbClient {
                 }
                 return Err(e);
             }
-            if buf[0] == MESSAGE_USERINPUT && n >= 28 {
+            if buf[0] == MESSAGE_USERINPUT && n as usize >= SRV_PAYLOAD + 20 {
+                let p = SRV_PAYLOAD;
                 out.push(InputEvent {
-                    input_type: i32::from_le_bytes(buf[8..12].try_into().unwrap()),
-                    dev_id: i32::from_le_bytes(buf[12..16].try_into().unwrap()),
-                    x: i32::from_le_bytes(buf[16..20].try_into().unwrap()),
-                    y: i32::from_le_bytes(buf[20..24].try_into().unwrap()),
-                    d: i32::from_le_bytes(buf[24..28].try_into().unwrap()),
+                    input_type: i32::from_le_bytes(buf[p..p + 4].try_into().unwrap()),
+                    dev_id: i32::from_le_bytes(buf[p + 4..p + 8].try_into().unwrap()),
+                    x: i32::from_le_bytes(buf[p + 8..p + 12].try_into().unwrap()),
+                    y: i32::from_le_bytes(buf[p + 12..p + 16].try_into().unwrap()),
+                    d: i32::from_le_bytes(buf[p + 16..p + 20].try_into().unwrap()),
                 });
             }
         }

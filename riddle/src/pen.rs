@@ -11,9 +11,23 @@ use std::os::fd::RawFd;
 use crate::fb::{SCREEN_H, SCREEN_W};
 
 // Digitizer axis ranges on the Paper Pro ("Elan marker input").
+#[cfg(not(feature = "rm2"))]
 const DIGI_MAX_X: i32 = 11180;
+#[cfg(not(feature = "rm2"))]
 const DIGI_MAX_Y: i32 = 15340;
+// Digitizer axis ranges on the rM2 ("Wacom I2C Digitizer"). The digitizer is
+// mounted rotated: raw X runs along the screen's LONG axis top→bottom
+// inverted, raw Y along the short axis — so screen x ← raw y and
+// screen y ← inverted raw x.
+#[cfg(feature = "rm2")]
+const DIGI_MAX_X: i32 = 20967;
+#[cfg(feature = "rm2")]
+const DIGI_MAX_Y: i32 = 15725;
 pub const MAX_PRESSURE: i32 = 4096;
+
+// input_event: struct timeval (2 C longs) + type u16 + code u16 + value i32:
+// 24 bytes on 64-bit targets, 16 on 32-bit (rM2).
+const EV_SIZE: usize = 2 * std::mem::size_of::<libc::c_long>() + 8;
 
 const EV_SYN: u16 = 0;
 const EV_KEY: u16 = 1;
@@ -65,7 +79,7 @@ impl PenDevice {
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
-        let grab = unsafe { libc::ioctl(fd, EVIOCGRAB, 1i32) };
+        let grab = unsafe { libc::ioctl(fd, EVIOCGRAB as _, 1i32) };
         if grab != 0 {
             eprintln!("riddle: warning: EVIOCGRAB failed ({}) — xochitl will also see the pen", io::Error::last_os_error());
         }
@@ -89,17 +103,16 @@ impl PenDevice {
     /// that changed state.
     pub fn drain(&mut self) -> Vec<PenSample> {
         let mut out = Vec::new();
-        // input_event on 64-bit: struct timeval (16) + type u16 + code u16 + value i32.
-        let mut buf = [0u8; 24 * 64];
+        let mut buf = [0u8; EV_SIZE * 64];
         loop {
             let n = unsafe { libc::read(self.fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
             if n <= 0 {
                 break;
             }
-            for chunk in buf[..n as usize].chunks_exact(24) {
-                let etype = u16::from_le_bytes(chunk[16..18].try_into().unwrap());
-                let code = u16::from_le_bytes(chunk[18..20].try_into().unwrap());
-                let value = i32::from_le_bytes(chunk[20..24].try_into().unwrap());
+            for chunk in buf[..n as usize].chunks_exact(EV_SIZE) {
+                let etype = u16::from_le_bytes(chunk[EV_SIZE - 8..EV_SIZE - 6].try_into().unwrap());
+                let code = u16::from_le_bytes(chunk[EV_SIZE - 6..EV_SIZE - 4].try_into().unwrap());
+                let value = i32::from_le_bytes(chunk[EV_SIZE - 4..].try_into().unwrap());
                 match (etype, code) {
                     (EV_ABS, ABS_X) => {
                         self.raw_x = value;
@@ -126,9 +139,20 @@ impl PenDevice {
                     (EV_SYN, SYN_REPORT) => {
                         if self.dirty {
                             self.dirty = false;
+                            #[cfg(not(feature = "rm2"))]
+                            let (x, y) = (
+                                self.raw_x * (SCREEN_W as i32 - 1) / DIGI_MAX_X,
+                                self.raw_y * (SCREEN_H as i32 - 1) / DIGI_MAX_Y,
+                            );
+                            #[cfg(feature = "rm2")]
+                            let (x, y) = (
+                                self.raw_y * (SCREEN_W as i32 - 1) / DIGI_MAX_Y,
+                                (SCREEN_H as i32 - 1)
+                                    - self.raw_x * (SCREEN_H as i32 - 1) / DIGI_MAX_X,
+                            );
                             out.push(PenSample {
-                                x: self.raw_x * (SCREEN_W as i32 - 1) / DIGI_MAX_X,
-                                y: self.raw_y * (SCREEN_H as i32 - 1) / DIGI_MAX_Y,
+                                x,
+                                y,
                                 pressure: self.pressure,
                                 tool: self.tool,
                                 touching: self.touching,
@@ -146,7 +170,7 @@ impl PenDevice {
 impl Drop for PenDevice {
     fn drop(&mut self) {
         unsafe {
-            libc::ioctl(self.fd, EVIOCGRAB, 0i32);
+            libc::ioctl(self.fd, EVIOCGRAB as _, 0i32);
             libc::close(self.fd);
         }
     }
@@ -156,7 +180,9 @@ fn find_marker_device() -> io::Result<String> {
     for i in 0..8 {
         let name_path = format!("/sys/class/input/event{i}/device/name");
         if let Ok(name) = std::fs::read_to_string(&name_path) {
-            if name.to_lowercase().contains("marker") {
+            let name = name.to_lowercase();
+            // "marker" on the Paper Pro (Elan), "wacom" on the rM1/rM2.
+            if name.contains("marker") || name.contains("wacom") {
                 return Ok(format!("/dev/input/event{i}"));
             }
         }

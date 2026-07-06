@@ -29,17 +29,18 @@ impl Display {
     pub fn open() -> io::Result<(Self, Surface)> {
         if let Ok(key) = std::env::var("QTFB_KEY") {
             let key: i32 = key.parse().map_err(io::Error::other)?;
-            let mut client = crate::qtfb::QtfbClient::connect(
-                key,
-                crate::qtfb::FBFMT_RMPP_RGB565,
-                1620,
-                2160,
-                2,
-            )?;
+            use crate::fb::{SCREEN_H, SCREEN_W};
+            #[cfg(not(feature = "rm2"))]
+            let format = crate::qtfb::FBFMT_RMPP_RGB565;
+            #[cfg(feature = "rm2")]
+            let format = crate::qtfb::FBFMT_RM2FB;
+            let mut client =
+                crate::qtfb::QtfbClient::connect(key, format, SCREEN_W, SCREEN_H, 2)?;
             let _ = client.set_refresh_mode(crate::qtfb::REFRESH_MODE_UFAST);
             let buf = client.framebuffer();
             let (ptr, len) = (buf.as_mut_ptr(), buf.len());
-            let surface = Surface::new(ptr, len, 1620, 2160, 1620 * 2, PixFmt::Rgb565);
+            let surface =
+                Surface::new(ptr, len, SCREEN_W, SCREEN_H, SCREEN_W * 2, PixFmt::Rgb565);
             return Ok((Display::Qtfb(client), surface));
         }
 
