@@ -9,6 +9,8 @@ pub enum Display {
     Qtfb(crate::qtfb::QtfbClient),
     #[allow(dead_code)]
     Quill,
+    #[cfg(feature = "rm2")]
+    Rm2fb(crate::rm2fb::Rm2fbClient),
 }
 
 // C ABI from libquill.so (linked when built with --features takeover).
@@ -44,7 +46,17 @@ impl Display {
             return Ok((Display::Qtfb(client), surface));
         }
 
-        #[cfg(feature = "takeover")]
+        #[cfg(feature = "rm2")]
+        {
+            let mut client = crate::rm2fb::Rm2fbClient::connect()?;
+            use crate::rm2fb::{BPP, HEIGHT, WIDTH};
+            let buf = client.framebuffer();
+            let (ptr, len) = (buf.as_mut_ptr(), buf.len());
+            let surface = Surface::new(ptr, len, WIDTH, HEIGHT, WIDTH * BPP, PixFmt::Rgb565);
+            return Ok((Display::Rm2fb(client), surface));
+        }
+
+        #[cfg(all(feature = "takeover", not(feature = "rm2")))]
         {
             unsafe {
                 if quill_ffi::quill_init() != 0 {
@@ -61,10 +73,16 @@ impl Display {
                 Ok((Display::Quill, surface))
             }
         }
-        #[cfg(not(feature = "takeover"))]
+        #[cfg(not(any(feature = "takeover", feature = "rm2")))]
         Err(io::Error::other(
             "QTFB_KEY not set and this build has no takeover backend",
         ))
+    }
+
+    /// Whether this backend owns the whole panel (xochitl stopped): input
+    /// devices, the power button and quit gestures are ours to handle.
+    pub fn is_takeover(&self) -> bool {
+        !matches!(self, Display::Qtfb(_))
     }
 
     /// Push a region to the panel. `fast` selects the low-latency waveform.
@@ -75,12 +93,16 @@ impl Display {
             }
             #[allow(unused_variables)]
             Display::Quill => {
-                #[cfg(feature = "takeover")]
+                #[cfg(all(feature = "takeover", not(feature = "rm2")))]
                 unsafe {
                     // mode 0 = fastest (ink), 3 = balanced (text/anim)
                     quill_ffi::quill_swap(x, y, w, h, if _fast { 0 } else { 3 }, 0);
                     quill_ffi::quill_process_events();
                 }
+            }
+            #[cfg(feature = "rm2")]
+            Display::Rm2fb(c) => {
+                let _ = c.update(x, y, w, h, _fast);
             }
         }
     }
@@ -92,11 +114,15 @@ impl Display {
             }
             #[allow(unused_variables)]
             Display::Quill => {
-                #[cfg(feature = "takeover")]
+                #[cfg(all(feature = "takeover", not(feature = "rm2")))]
                 unsafe {
                     quill_ffi::quill_swap(0, 0, w as i32, h as i32, 3, 0);
                     quill_ffi::quill_process_events();
                 }
+            }
+            #[cfg(feature = "rm2")]
+            Display::Rm2fb(c) => {
+                let _ = c.update(0, 0, w as i32, h as i32, false);
             }
         }
         let _ = (w, h);
@@ -110,28 +136,34 @@ impl Display {
             }
             #[allow(unused_variables)]
             Display::Quill => {
-                #[cfg(feature = "takeover")]
+                #[cfg(all(feature = "takeover", not(feature = "rm2")))]
                 unsafe {
                     quill_ffi::quill_swap(0, 0, w as i32, h as i32, 4, 1);
                     quill_ffi::quill_process_events();
                 }
+            }
+            #[cfg(feature = "rm2")]
+            Display::Rm2fb(c) => {
+                let _ = c.full_refresh(w, h);
             }
         }
         let _ = (w, h);
     }
 
     /// Drain window-system events. For qtfb this also detects window close
-    /// (returns Err); the takeover backend has no window to lose.
+    /// (returns Err); the takeover backends have no window to lose.
     pub fn pump(&self) -> io::Result<Vec<crate::qtfb::InputEvent>> {
         match self {
             Display::Qtfb(c) => c.drain_events(),
             Display::Quill => {
-                #[cfg(feature = "takeover")]
+                #[cfg(all(feature = "takeover", not(feature = "rm2")))]
                 unsafe {
                     quill_ffi::quill_process_events();
                 }
                 Ok(Vec::new())
             }
+            #[cfg(feature = "rm2")]
+            Display::Rm2fb(_) => Ok(Vec::new()),
         }
     }
 

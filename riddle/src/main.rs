@@ -15,6 +15,8 @@ mod oracle;
 mod pen;
 mod power;
 mod qtfb;
+#[cfg(feature = "rm2")]
+mod rm2fb;
 mod script;
 mod surface;
 mod touch;
@@ -66,6 +68,18 @@ fn main() {
         let png = args.get(2).map(String::as_str).unwrap_or("/tmp/riddle-page.png");
         std::process::exit(oracle_test(png));
     }
+    // Hidden diagnostic: `riddle --display-test` opens the display backend,
+    // sweeps a bar across the panel and exits. Verifies the takeover stack
+    // (server, shm, socket, waveforms) without pen or oracle.
+    if args.get(1).map(String::as_str) == Some("--display-test") {
+        std::process::exit(match display_test() {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("display test failed: {e}");
+                1
+            }
+        });
+    }
     if let Err(e) = run() {
         eprintln!("riddle: fatal: {e}");
         std::process::exit(1);
@@ -106,11 +120,37 @@ fn oracle_test(png: &str) -> i32 {
     if got.trim().is_empty() { 1 } else { 0 }
 }
 
+/// Sweep a black bar down the panel with the fast waveform, then clear.
+fn display_test() -> std::io::Result<()> {
+    let (disp, mut surf) = display::Display::open()?;
+    eprintln!("display: {}x{} (takeover: {})", surf.w, surf.h, disp.is_takeover());
+    surf.fill_rect(0, 0, SCREEN_W, SCREEN_H, WHITE);
+    disp.full_refresh(surf.w, surf.h);
+    std::thread::sleep(Duration::from_millis(600));
+
+    let t0 = Instant::now();
+    let bar_h = 40usize;
+    let steps = 12;
+    for i in 0..steps {
+        let y = i * (SCREEN_H - bar_h) / (steps - 1);
+        surf.fill_rect(0, y, SCREEN_W, bar_h, BLACK);
+        disp.update(0, y as i32, SCREEN_W as i32, bar_h as i32, true);
+        std::thread::sleep(Duration::from_millis(60));
+        surf.fill_rect(0, y, SCREEN_W, bar_h, WHITE);
+        disp.update(0, y as i32, SCREEN_W as i32, bar_h as i32, true);
+    }
+    eprintln!("swept {} fast updates in {}ms", steps * 2, t0.elapsed().as_millis());
+    disp.full_refresh(surf.w, surf.h);
+    std::thread::sleep(Duration::from_millis(800));
+    disp.terminate();
+    Ok(())
+}
+
 fn run() -> std::io::Result<()> {
     let font = FontRef::try_from_slice(FONT_TTF).map_err(std::io::Error::other)?;
 
     let (disp, mut surf) = display::Display::open()?;
-    let takeover = matches!(disp, display::Display::Quill);
+    let takeover = disp.is_takeover();
     eprintln!(
         "riddle: display {} ({}x{} stride {})",
         if takeover { "quill/takeover" } else { "qtfb" },

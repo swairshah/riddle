@@ -4,6 +4,6 @@
   "version": "0.2.0",
   "description": "An enchanted diary: write to it with the pen and it writes back.",
   "application": "appload-launch-rm2.sh",
-  "qtfb": true,
+  "qtfb": false,
   "aspectRatio": "original"
 }

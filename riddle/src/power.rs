@@ -6,6 +6,8 @@
 use std::io;
 use std::os::fd::RawFd;
 
+use crate::pen::EV_SIZE;
+
 const EV_KEY: u16 = 1;
 const KEY_POWER: u16 = 116;
 const EVIOCGRAB: libc::c_ulong = 0x40044590;
@@ -39,16 +41,16 @@ impl PowerButton {
     /// True if a power-key press (value 1) was seen since the last drain.
     pub fn drain_pressed(&mut self) -> bool {
         let mut pressed = false;
-        let mut buf = [0u8; 24 * 16];
+        let mut buf = [0u8; EV_SIZE * 16];
         loop {
             let n = unsafe { libc::read(self.fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
             if n <= 0 {
                 break;
             }
-            for chunk in buf[..n as usize].chunks_exact(24) {
-                let etype = u16::from_le_bytes(chunk[16..18].try_into().unwrap());
-                let code = u16::from_le_bytes(chunk[18..20].try_into().unwrap());
-                let value = i32::from_le_bytes(chunk[20..24].try_into().unwrap());
+            for chunk in buf[..n as usize].chunks_exact(EV_SIZE) {
+                let etype = u16::from_le_bytes(chunk[EV_SIZE - 8..EV_SIZE - 6].try_into().unwrap());
+                let code = u16::from_le_bytes(chunk[EV_SIZE - 6..EV_SIZE - 4].try_into().unwrap());
+                let value = i32::from_le_bytes(chunk[EV_SIZE - 4..].try_into().unwrap());
                 if etype == EV_KEY && code == KEY_POWER && value == 1 {
                     pressed = true;
                 }

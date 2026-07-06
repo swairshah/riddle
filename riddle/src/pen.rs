@@ -26,8 +26,8 @@ const DIGI_MAX_Y: i32 = 15725;
 pub const MAX_PRESSURE: i32 = 4096;
 
 // input_event: struct timeval (2 C longs) + type u16 + code u16 + value i32:
-// 24 bytes on 64-bit targets, 16 on 32-bit (rM2).
-const EV_SIZE: usize = 2 * std::mem::size_of::<libc::c_long>() + 8;
+// 24 bytes on 64-bit targets, 16 on 32-bit (rM2). Shared with touch/power.
+pub(crate) const EV_SIZE: usize = 2 * std::mem::size_of::<libc::c_long>() + 8;
 
 const EV_SYN: u16 = 0;
 const EV_KEY: u16 = 1;
