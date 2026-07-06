@@ -170,8 +170,22 @@ fn run() -> std::io::Result<()> {
     let mut stylus_tapped = false;
     let mut ink_dirty = BBox::empty();
     let mut last_flush = Instant::now();
-    // Takeover swaps are cheap and synchronous; qtfb needs coalescing.
-    let flush_every = if takeover { Duration::from_millis(8) } else { Duration::from_millis(35) };
+    // Takeover swaps are cheap and synchronous; qtfb needs coalescing — but
+    // less on the rM2, where the panel path is slow anyway and waiting only
+    // adds to it. RIDDLE_FLUSH_MS overrides for tuning without a rebuild.
+    #[cfg(feature = "rm2")]
+    const FLUSH_MS: u64 = 15;
+    #[cfg(not(feature = "rm2"))]
+    const FLUSH_MS: u64 = 35;
+    let flush_every = if takeover {
+        Duration::from_millis(8)
+    } else {
+        let ms = std::env::var("RIDDLE_FLUSH_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(FLUSH_MS);
+        Duration::from_millis(ms)
+    };
 
     eprintln!("riddle: the diary is open");
 
