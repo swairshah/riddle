@@ -1,14 +1,24 @@
-//! Display backends: qtfb (windowed, inside xochitl) and quill (takeover,
-//! vendor engine, xochitl stopped). Selected at runtime: if QTFB_KEY is set
-//! we're an AppLoad app; otherwise we assume takeover.
+//! Display backends, selected at runtime:
+//!  - qtfb (windowed, inside xochitl) whenever QTFB_KEY is set — an AppLoad
+//!    app on any device.
+//!  - takeover otherwise: quill (vendor engine, aarch64 --features takeover)
+//!    on the Paper Pro, or rm2fb (community swtcon server) on the rM2.
 
+use crate::fb::{SCREEN_H, SCREEN_W};
 use crate::surface::{PixFmt, Surface};
 use std::io;
+
+#[cfg(target_arch = "arm")]
+const QTFB_FORMAT: u8 = crate::qtfb::FBFMT_RM2FB;
+#[cfg(not(target_arch = "arm"))]
+const QTFB_FORMAT: u8 = crate::qtfb::FBFMT_RMPP_RGB565;
 
 pub enum Display {
     Qtfb(crate::qtfb::QtfbClient),
     #[allow(dead_code)]
     Quill,
+    #[cfg(target_arch = "arm")]
+    Rm2fb(crate::rm2fb::Rm2fb),
 }
 
 // C ABI from libquill.so (linked when built with --features takeover).
@@ -31,19 +41,28 @@ impl Display {
             let key: i32 = key.parse().map_err(io::Error::other)?;
             let mut client = crate::qtfb::QtfbClient::connect(
                 key,
-                crate::qtfb::FBFMT_RMPP_RGB565,
-                1620,
-                2160,
+                QTFB_FORMAT,
+                SCREEN_W,
+                SCREEN_H,
                 2,
             )?;
             let _ = client.set_refresh_mode(crate::qtfb::REFRESH_MODE_UFAST);
             let buf = client.framebuffer();
             let (ptr, len) = (buf.as_mut_ptr(), buf.len());
-            let surface = Surface::new(ptr, len, 1620, 2160, 1620 * 2, PixFmt::Rgb565);
+            let surface = Surface::new(ptr, len, SCREEN_W, SCREEN_H, SCREEN_W * 2, PixFmt::Rgb565);
             return Ok((Display::Qtfb(client), surface));
         }
 
-        #[cfg(feature = "takeover")]
+        // No QTFB_KEY: takeover. On the rM2 that means the rm2fb server.
+        #[cfg(target_arch = "arm")]
+        {
+            let fb = crate::rm2fb::Rm2fb::open()?;
+            let (ptr, len) = fb.framebuffer();
+            let surface = Surface::new(ptr, len, SCREEN_W, SCREEN_H, SCREEN_W * 2, PixFmt::Rgb565);
+            Ok((Display::Rm2fb(fb), surface))
+        }
+
+        #[cfg(all(feature = "takeover", not(target_arch = "arm")))]
         {
             unsafe {
                 if quill_ffi::quill_init() != 0 {
@@ -60,10 +79,16 @@ impl Display {
                 Ok((Display::Quill, surface))
             }
         }
-        #[cfg(not(feature = "takeover"))]
+        #[cfg(all(not(feature = "takeover"), not(target_arch = "arm")))]
         Err(io::Error::other(
             "QTFB_KEY not set and this build has no takeover backend",
         ))
+    }
+
+    /// True when we own the whole device (no window system): grab touch and
+    /// the power button too.
+    pub fn takeover(&self) -> bool {
+        !matches!(self, Display::Qtfb(_))
     }
 
     /// Push a region to the panel. `fast` selects the low-latency waveform.
@@ -81,6 +106,11 @@ impl Display {
                     quill_ffi::quill_process_events();
                 }
             }
+            #[cfg(target_arch = "arm")]
+            Display::Rm2fb(fb) => {
+                let wf = if _fast { crate::rm2fb::WAVEFORM_DU } else { crate::rm2fb::WAVEFORM_GL16 };
+                fb.update(x, y, w, h, wf, crate::rm2fb::UPDATE_MODE_PARTIAL);
+            }
         }
     }
 
@@ -96,6 +126,10 @@ impl Display {
                     quill_ffi::quill_swap(0, 0, w as i32, h as i32, 3, 0);
                     quill_ffi::quill_process_events();
                 }
+            }
+            #[cfg(target_arch = "arm")]
+            Display::Rm2fb(fb) => {
+                fb.update(0, 0, w as i32, h as i32, crate::rm2fb::WAVEFORM_GL16, crate::rm2fb::UPDATE_MODE_PARTIAL);
             }
         }
         let _ = (w, h);
@@ -115,12 +149,16 @@ impl Display {
                     quill_ffi::quill_process_events();
                 }
             }
+            #[cfg(target_arch = "arm")]
+            Display::Rm2fb(fb) => {
+                fb.update(0, 0, w as i32, h as i32, crate::rm2fb::WAVEFORM_GC16, crate::rm2fb::UPDATE_MODE_FULL);
+            }
         }
         let _ = (w, h);
     }
 
     /// Drain window-system events. For qtfb this also detects window close
-    /// (returns Err); the takeover backend has no window to lose.
+    /// (returns Err); the takeover backends have no window to lose.
     pub fn pump(&self) -> io::Result<Vec<crate::qtfb::InputEvent>> {
         match self {
             Display::Qtfb(c) => c.drain_events(),
@@ -131,6 +169,8 @@ impl Display {
                 }
                 Ok(Vec::new())
             }
+            #[cfg(target_arch = "arm")]
+            Display::Rm2fb(_) => Ok(Vec::new()),
         }
     }
 

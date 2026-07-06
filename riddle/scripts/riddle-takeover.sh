@@ -1,6 +1,10 @@
 #!/bin/bash
-# Launch the diary in full-takeover mode: stop xochitl, run riddle against the
-# vendor e-ink engine (instant ink), ALWAYS restore xochitl on exit.
+# Launch the diary in full-takeover mode: stop xochitl, run riddle directly
+# against the panel (instant ink), ALWAYS restore xochitl on exit.
+#
+#  - reMarkable Paper Pro: the vendor e-ink engine via libquill/libqsgepaper.
+#  - reMarkable 2: the rm2fb server (community swtcon) — it stays up while
+#    xochitl is stopped, and riddle talks to it directly.
 #
 # Exit the diary: power button, 5-finger tap, or SIGTERM. Escape hatch if
 # anything wedges: ssh rm 'systemctl start xochitl'.
@@ -24,15 +28,26 @@ if [ -f "$HERE/oracle.env" ]; then
     set -a; . "$HERE/oracle.env"; set +a
 fi
 
-systemctl stop xochitl
-rm -f /tmp/epframebuffer.lock      # stale EPD lock blocks the engine
-sleep 1
+MACHINE=$(cat /sys/devices/soc0/machine 2>/dev/null)
 
-cd "$HERE"
-# libquill.so ships in this bundle; libqsgepaper.so (reMarkable's proprietary
-# engine) comes from the device's own scenegraph plugin dir. We search the
-# bundle first, then a standalone /home/root/quill install, then the plugin dir.
-LD_LIBRARY_PATH="$HERE:/home/root/quill:/usr/lib/plugins/scenegraph" \
-    PAPERTERM_SHELL= HOME=/home/root \
-    "$HERE/riddle"
+if [ "$MACHINE" = "reMarkable 2.0" ]; then
+    # The rm2fb server hosts the display; make sure it's up before xochitl
+    # (its client) goes down. On a Toltec/xovi rM2 it is already running.
+    systemctl start rm2fb 2>/dev/null || true
+    systemctl stop xochitl
+    sleep 1
+    cd "$HERE"
+    HOME=/home/root "$HERE/riddle"
+else
+    systemctl stop xochitl
+    rm -f /tmp/epframebuffer.lock      # stale EPD lock blocks the engine
+    sleep 1
+    cd "$HERE"
+    # libquill.so ships in this bundle; libqsgepaper.so (reMarkable's proprietary
+    # engine) comes from the device's own scenegraph plugin dir. We search the
+    # bundle first, then a standalone /home/root/quill install, then the plugin dir.
+    LD_LIBRARY_PATH="$HERE:/home/root/quill:/usr/lib/plugins/scenegraph" \
+        PAPERTERM_SHELL= HOME=/home/root \
+        "$HERE/riddle"
+fi
 echo "riddle-takeover: diary closed ($?), restoring xochitl"

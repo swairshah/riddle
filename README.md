@@ -6,7 +6,9 @@ writes itself back in a flowing hand, stroke by stroke, then fades away.
 
 No screen glow, no keyboard, no chat UI. Just ink appearing on paper.
 
-_This is the diary from [the demo](https://x.com/MaximeRivest)._
+_This is the diary from [the demo](https://x.com/MaximeRivest)._ There is
+also a **reMarkable 2** port — see
+[riddle on the reMarkable 2](#riddle-on-the-remarkable-2).
 
 ### 🪄 New to this? Start here
 
@@ -146,6 +148,47 @@ AppLoad (`appload-launch.sh`) detaches into a transient systemd unit, stops
 xochitl, runs the diary, and **always restores xochitl on exit** — exit with
 the power button, a 5-finger tap, or SIGTERM. If anything wedges:
 `ssh root@10.11.99.1 'systemctl start xochitl'`.
+
+## riddle on the reMarkable 2
+
+The diary also runs on the **reMarkable 2** (armv7). The same binary carries
+both display paths and picks one at runtime:
+
+- **Windowed (qtfb/AppLoad)** — needs [xovi + AppLoad](https://github.com/asivery/rm-appload)
+  (on the rM2 that stack sits on [rm2fb](https://github.com/ddvk/remarkable2-framebuffer),
+  which you'll already have). This is the default in the bundle below.
+- **Takeover** — instead of the Paper Pro's vendor engine (quill), riddle talks
+  directly to the **rm2fb server**: xochitl is stopped, the rm2fb service keeps
+  the panel alive, and riddle drives it over rm2fb's shared framebuffer +
+  update queue. No proprietary libraries, no SDK — it's built into the binary.
+
+Build (cross-compiled, fully static musl — no glibc coupling with the device):
+
+```sh
+rustup target add armv7-unknown-linux-musleabihf
+apt install gcc-arm-linux-gnueabihf        # compiles ring's C; rust-lld links
+cd riddle && ./build-rm2.sh
+```
+
+This produces a ready-to-drop AppLoad bundle in `dist/rm2/riddle/`:
+
+```sh
+scp -O -r dist/rm2/riddle root@10.11.99.1:/home/root/xovi/exthome/appload/
+```
+
+Then add your API key (`cp oracle.env.example oracle.env` in that folder) and
+launch **The Diary** from AppLoad. For takeover mode (lower latency, whole
+screen), edit `external.manifest.json` in the installed folder and set
+`"qtfb": false` — the launcher then stops xochitl, runs against rm2fb, and
+restores xochitl when you leave (power button, 5-finger tap, or SIGTERM).
+
+Device differences handled by the port: 1404×1872 panel, the Wacom digitizer's
+rotated axes, the 16-byte 32-bit `input_event` layout, the rM2 qtfb
+framebuffer format, and the rm2fb takeover backend. The pen/eraser, gestures,
+sleep page, and both oracle backends work the same (prefer the HTTP oracle —
+running Node for pi is heavy on the rM2's 1 GB of RAM). Tested paths may still have
+rough edges on the rM2 — if the pen lands mirrored or offset on your unit,
+open an issue with `evtest` output of the Wacom device.
 
 ## Fonts
 

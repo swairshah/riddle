@@ -1,24 +1,26 @@
 //! Raw evdev pen input: the full digitizer, bypassing Qt's filtered view.
-//! Gives us 0-4096 pressure, tilt, hover, and the eraser tip (BTN_TOOL_RUBBER),
-//! at the hardware event rate.
+//! Gives us full-resolution pressure, hover, and the eraser tip
+//! (BTN_TOOL_RUBBER), at the hardware event rate.
 //!
 //! The device is grabbed (EVIOCGRAB) while the diary is open so xochitl
 //! doesn't also react to the pen; released automatically on close/exit.
+//!
+//! Digitizer profiles (picked at compile time with the panel geometry):
+//!  - Paper Pro (aarch64): "Elan marker input", axes already aligned with the
+//!    framebuffer, so mapping is a plain scale.
+//!  - reMarkable 2 (armv7): "Wacom I2C Digitizer", mounted rotated 90° with
+//!    its origin at the portrait bottom-left: raw X runs up the long screen
+//!    axis, raw Y runs across the short one. Screen x comes from raw Y, and
+//!    screen y from the *inverted* raw X (same transform libremarkable uses).
 
 use std::io;
 use std::os::fd::RawFd;
 
+use crate::evdev;
 use crate::fb::{SCREEN_H, SCREEN_W};
 
-// Digitizer axis ranges on the Paper Pro ("Elan marker input").
-const DIGI_MAX_X: i32 = 11180;
-const DIGI_MAX_Y: i32 = 15340;
 pub const MAX_PRESSURE: i32 = 4096;
 
-const EV_SYN: u16 = 0;
-const EV_KEY: u16 = 1;
-const EV_ABS: u16 = 3;
-const SYN_REPORT: u16 = 0;
 const ABS_X: u16 = 0;
 const ABS_Y: u16 = 1;
 const ABS_PRESSURE: u16 = 24;
@@ -26,7 +28,39 @@ const BTN_TOOL_PEN: u16 = 320;
 const BTN_TOOL_RUBBER: u16 = 321;
 const BTN_TOUCH: u16 = 330;
 
-const EVIOCGRAB: libc::c_ulong = 0x40044590;
+#[cfg(target_arch = "arm")]
+mod digi {
+    /// reMarkable 2: "Wacom I2C Digitizer".
+    pub const NAMES: &[&str] = &["wacom"];
+    const RAW_MAX_X: i32 = 20966;
+    const RAW_MAX_Y: i32 = 15725;
+
+    #[inline]
+    pub fn map(raw_x: i32, raw_y: i32) -> (i32, i32) {
+        use crate::fb::{SCREEN_H, SCREEN_W};
+        (
+            raw_y * (SCREEN_W as i32 - 1) / RAW_MAX_Y,
+            (RAW_MAX_X - raw_x) * (SCREEN_H as i32 - 1) / RAW_MAX_X,
+        )
+    }
+}
+
+#[cfg(not(target_arch = "arm"))]
+mod digi {
+    /// Paper Pro: "Elan marker input".
+    pub const NAMES: &[&str] = &["marker"];
+    const RAW_MAX_X: i32 = 11180;
+    const RAW_MAX_Y: i32 = 15340;
+
+    #[inline]
+    pub fn map(raw_x: i32, raw_y: i32) -> (i32, i32) {
+        use crate::fb::{SCREEN_H, SCREEN_W};
+        (
+            raw_x * (SCREEN_W as i32 - 1) / RAW_MAX_X,
+            raw_y * (SCREEN_H as i32 - 1) / RAW_MAX_Y,
+        )
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -57,19 +91,13 @@ pub struct PenDevice {
 }
 
 impl PenDevice {
-    /// Find and grab the marker input device.
+    /// Find and grab the stylus input device.
     pub fn open() -> io::Result<Self> {
-        let path = find_marker_device()?;
-        let cpath = std::ffi::CString::new(path.clone()).unwrap();
-        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
+        let (fd, path, grabbed) = evdev::open_by_name(digi::NAMES)?;
+        if !grabbed {
+            eprintln!("riddle: warning: EVIOCGRAB failed — xochitl will also see the pen");
         }
-        let grab = unsafe { libc::ioctl(fd, EVIOCGRAB, 1i32) };
-        if grab != 0 {
-            eprintln!("riddle: warning: EVIOCGRAB failed ({}) — xochitl will also see the pen", io::Error::last_os_error());
-        }
-        eprintln!("riddle: pen device {path} opened (grabbed: {})", grab == 0);
+        eprintln!("riddle: pen device {path} opened (grabbed: {grabbed})");
         Ok(Self {
             fd,
             raw_x: 0,
@@ -89,46 +117,44 @@ impl PenDevice {
     /// that changed state.
     pub fn drain(&mut self) -> Vec<PenSample> {
         let mut out = Vec::new();
-        // input_event on 64-bit: struct timeval (16) + type u16 + code u16 + value i32.
-        let mut buf = [0u8; 24 * 64];
+        let mut buf = [0u8; evdev::EV_SIZE * 64];
         loop {
             let n = unsafe { libc::read(self.fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
             if n <= 0 {
                 break;
             }
-            for chunk in buf[..n as usize].chunks_exact(24) {
-                let etype = u16::from_le_bytes(chunk[16..18].try_into().unwrap());
-                let code = u16::from_le_bytes(chunk[18..20].try_into().unwrap());
-                let value = i32::from_le_bytes(chunk[20..24].try_into().unwrap());
+            for chunk in buf[..n as usize].chunks_exact(evdev::EV_SIZE) {
+                let (etype, code, value) = evdev::parse(chunk);
                 match (etype, code) {
-                    (EV_ABS, ABS_X) => {
+                    (evdev::EV_ABS, ABS_X) => {
                         self.raw_x = value;
                         self.dirty = true;
                     }
-                    (EV_ABS, ABS_Y) => {
+                    (evdev::EV_ABS, ABS_Y) => {
                         self.raw_y = value;
                         self.dirty = true;
                     }
-                    (EV_ABS, ABS_PRESSURE) => {
+                    (evdev::EV_ABS, ABS_PRESSURE) => {
                         self.pressure = value;
                         self.dirty = true;
                     }
-                    (EV_KEY, BTN_TOOL_PEN) if value == 1 => {
+                    (evdev::EV_KEY, BTN_TOOL_PEN) if value == 1 => {
                         self.tool = Tool::Pen;
                     }
-                    (EV_KEY, BTN_TOOL_RUBBER) => {
+                    (evdev::EV_KEY, BTN_TOOL_RUBBER) => {
                         self.tool = if value == 1 { Tool::Eraser } else { Tool::Pen };
                     }
-                    (EV_KEY, BTN_TOUCH) => {
+                    (evdev::EV_KEY, BTN_TOUCH) => {
                         self.touching = value == 1;
                         self.dirty = true;
                     }
-                    (EV_SYN, SYN_REPORT) => {
+                    (evdev::EV_SYN, evdev::SYN_REPORT) => {
                         if self.dirty {
                             self.dirty = false;
+                            let (x, y) = digi::map(self.raw_x, self.raw_y);
                             out.push(PenSample {
-                                x: self.raw_x * (SCREEN_W as i32 - 1) / DIGI_MAX_X,
-                                y: self.raw_y * (SCREEN_H as i32 - 1) / DIGI_MAX_Y,
+                                x: x.clamp(0, SCREEN_W as i32 - 1),
+                                y: y.clamp(0, SCREEN_H as i32 - 1),
                                 pressure: self.pressure,
                                 tool: self.tool,
                                 touching: self.touching,
@@ -145,21 +171,9 @@ impl PenDevice {
 
 impl Drop for PenDevice {
     fn drop(&mut self) {
+        evdev::ungrab(self.fd);
         unsafe {
-            libc::ioctl(self.fd, EVIOCGRAB, 0i32);
             libc::close(self.fd);
         }
     }
-}
-
-fn find_marker_device() -> io::Result<String> {
-    for i in 0..8 {
-        let name_path = format!("/sys/class/input/event{i}/device/name");
-        if let Ok(name) = std::fs::read_to_string(&name_path) {
-            if name.to_lowercase().contains("marker") {
-                return Ok(format!("/dev/input/event{i}"));
-            }
-        }
-    }
-    Err(io::Error::new(io::ErrorKind::NotFound, "no marker input device found"))
 }

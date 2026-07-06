@@ -8,6 +8,7 @@
 //! built with --features takeover and launched with xochitl stopped.
 
 mod display;
+mod evdev;
 mod fb;
 mod help;
 mod ink;
@@ -15,6 +16,8 @@ mod oracle;
 mod pen;
 mod power;
 mod qtfb;
+#[cfg(target_arch = "arm")]
+mod rm2fb;
 mod script;
 mod surface;
 mod touch;
@@ -27,7 +30,7 @@ use std::time::{Duration, Instant};
 use ab_glyph::FontRef;
 
 use fb::{BBox, SCREEN_H, SCREEN_W};
-use surface::{Surface, BLACK, WHITE};
+use surface::{BLACK, WHITE};
 
 const FONT_TTF: &[u8] = include_bytes!("../fonts/DancingScript.ttf");
 const PNG_PATH: &str = "/tmp/riddle-page.png";
@@ -110,10 +113,10 @@ fn run() -> std::io::Result<()> {
     let font = FontRef::try_from_slice(FONT_TTF).map_err(std::io::Error::other)?;
 
     let (disp, mut surf) = display::Display::open()?;
-    let takeover = matches!(disp, display::Display::Quill);
+    let takeover = disp.takeover();
     eprintln!(
         "riddle: display {} ({}x{} stride {})",
-        if takeover { "quill/takeover" } else { "qtfb" },
+        if takeover { "takeover" } else { "qtfb" },
         surf.w,
         surf.h,
         surf.stride

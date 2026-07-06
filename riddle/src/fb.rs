@@ -1,6 +1,17 @@
 //! Geometry helpers. Drawing lives in surface.rs.
+//!
+//! The panel geometry is decided at compile time by the target architecture:
+//! 32-bit ARM builds are for the reMarkable 2 (1404x1872), aarch64 builds for
+//! the reMarkable Paper Pro (1620x2160).
 
+#[cfg(target_arch = "arm")]
+pub const SCREEN_W: usize = 1404;
+#[cfg(target_arch = "arm")]
+pub const SCREEN_H: usize = 1872;
+
+#[cfg(not(target_arch = "arm"))]
 pub const SCREEN_W: usize = 1620;
+#[cfg(not(target_arch = "arm"))]
 pub const SCREEN_H: usize = 2160;
 
 /// Grow-only pixel bounding box, used to build update/dissolve regions.
