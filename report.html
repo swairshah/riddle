@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ink at Eight Milliseconds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500;1,600;1,700;1,800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script>
+  /* Apply a previously chosen theme before first paint, to avoid a flash. */
+  (function () {
+    try {
+      var t = localStorage.getItem("magazine-theme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
+<style>
+  /* ===== palette: light is the default; dark applies via OS preference
+     (prefers-color-scheme) OR a manual [data-theme] override set by the
+     corner toggle. Authors never touch this block. ===== */
+  :root {
+    color-scheme: light;
+    --ink:        #121212;
+    --ink-soft:   #2a2a2a;
+    --muted:      #6b6b6b;
+    --paper:      #f6f1e7;
+    --paper-2:    #efe7d6;
+    --rule:       #1a1a1a;
+    --accent:     #b43a1a;
+    --accent-soft:#e9c6b6;
+    --divider:    #c8bfae;  /* dashed table/list dividers */
+    --zero:       #c1b7a2;  /* de-emphasised zero / N-A cells */
+    --measure:    66ch;
+  }
+  /* manual override -> dark */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ink:        #ecebe5;
+    --ink-soft:   #c9c6bd;
+    --muted:      #85817a;
+    --paper:      #121110;
+    --paper-2:    #1e1c19;
+    --rule:       #e8e3d8;
+    --accent:     #e4916a;
+    --accent-soft:#3a2218;
+    --divider:    #3a3630;
+    --zero:       #4a4640;
+  }
+  /* OS preference -> dark, unless the reader has manually chosen a theme */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      color-scheme: dark;
+      --ink:        #ecebe5;
+      --ink-soft:   #c9c6bd;
+      --muted:      #85817a;
+      --paper:      #121110;
+      --paper-2:    #1e1c19;
+      --rule:       #e8e3d8;
+      --accent:     #e4916a;
+      --accent-soft:#3a2218;
+      --divider:    #3a3630;
+      --zero:       #4a4640;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Inter", system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.55;
+    font-feature-settings: "ss01","ss02","cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 72px 48px 120px;
+  }
+  @media (max-width: 720px) {
+    .page { padding: 40px 22px 80px; }
+  }
+
+  /* ---- theme toggle (the only chrome that isn't the article) ---- */
+  .theme-toggle {
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    z-index: 50;
+    width: 38px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid var(--rule);
+    border-radius: 50%;
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-font-smoothing: antialiased;
+    transition: color .15s ease, border-color .15s ease;
+  }
+  .theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+  @media print { .theme-toggle { display: none; } }
+
+  /* ---- masthead ---- */
+  .masthead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 4px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 14px 0;
+    font-family: "Inter", sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .masthead .vol { color: var(--muted); }
+  .masthead .logo {
+    font-family: "EB Garamond", "Garamond", serif;
+    font-weight: 700;
+    font-style: italic;
+    font-size: 28px;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  /* ---- headline block ---- */
+  .kicker {
+    margin-top: 56px;
+    font-size: 12px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  h1.display {
+    font-family: "EB Garamond", "Garamond", serif;
+    font-weight: 500;
+    font-style: normal;
+    font-size: clamp(58px, 10vw, 152px);
+    line-height: 0.96;
+    letter-spacing: -0.015em;
+    margin: 14px 0 18px;
+    color: var(--ink);
+  }
+  h1.display em {
+    font-style: italic;
+    font-weight: 500;
+    color: var(--accent);
+  }
+  .deck {
+    font-family: "EB Garamond", "Garamond", serif;
+    font-weight: 400;
+    font-style: italic;
+    font-size: clamp(20px, 2.2vw, 28px);
+    line-height: 1.35;
+    color: var(--ink-soft);
+    max-width: 42ch;
+    margin: 0 0 28px;
+  }
+  .byline {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 14px 0;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .byline b { color: var(--ink); font-weight: 600; }
+
+  /* ---- section structure ---- */
+  section { margin-top: 72px; }
+  h2.section {
+    font-family: "EB Garamond", "Garamond", serif;
+    font-weight: 500;
+    font-size: clamp(34px, 4.5vw, 58px);
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    margin: 0 0 4px;
+  }
+  h2.section .num {
+    font-family: "EB Garamond", "Garamond", serif;
+    font-style: italic;
+    font-weight: 400;
+    color: var(--accent);
+    margin-right: 14px;
+  }
+  .section-rule {
+    height: 1px;
+    background: var(--rule);
+    margin: 18px 0 32px;
+  }
+
+  /* ---- lede ---- */
+  p.lede { max-width: var(--measure); font-size: 18px; }
+  p.lede:first-of-type::first-letter {
+    font-family: "EB Garamond", "Garamond", serif;
+    font-weight: 600;
+    float: left;
+    font-size: 5.6em;
+    line-height: 0.82;
+    padding: 6px 12px 0 0;
+    color: var(--ink);
+  }
+
+  /* ---- body copy ---- */
+  p { max-width: var(--measure); margin: 0 0 18px; }
+  p.wide { max-width: none; }
+  ul { max-width: var(--measure); padding-left: 1.1em; }
+  ul li { margin-bottom: 6px; }
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+  code, .mono {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.88em;
+    background: var(--paper-2);
+    padding: 1px 5px;
+    border-radius: 2px;
+  }
+
+  /* ---- tables, editorial style ---- */
+  .tbl-wrap { overflow-x: auto; margin: 0 0 16px; }
+  table.data {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: "Inter", sans-serif;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  table.data caption {
+    text-align: left;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 0 0 10px;
+    font-weight: 600;
+  }
+  table.data th, table.data td {
+    padding: 11px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  table.data thead th {
+    border-top: 2px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  table.data tbody tr + tr td { border-top: 1px dashed var(--divider); }
+  table.data tbody th {
+    font-weight: 500;
+    color: var(--muted);
+    width: 26%;
+  }
+  table.data td.num, table.data th.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  table.data tfoot td { border-top: 1px solid var(--rule); }
+  table.data .zero { color: var(--zero); }
+
+  /* ---- 3-up profile cards ---- */
+  .profiles {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+    border-top: 2px solid var(--rule);
+    border-bottom: 2px solid var(--rule);
+    margin-top: 32px;
+  }
+  .profile {
+    padding: 28px 26px 32px;
+    border-right: 1px solid var(--rule);
+  }
+  .profile:last-child { border-right: none; }
+  @media (max-width: 840px) {
+    .profiles { grid-template-columns: 1fr; }
+    .profile { border-right: none; border-bottom: 1px solid var(--rule); }
+    .profile:last-child { border-bottom: none; }
+  }
+  .profile .label {
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+  .profile h3 {
+    font-family: "EB Garamond", "Garamond", serif;
+    font-weight: 500;
+    font-size: clamp(30px, 2.7vw, 40px);
+    line-height: 1.05;
+    letter-spacing: -0.005em;
+    margin: 0 0 8px;
+  }
+  .profile .sub {
+    font-family: "EB Garamond", "Garamond", serif;
+    font-style: italic;
+    font-weight: 400;
+    color: var(--muted);
+    font-size: 15px;
+    margin-bottom: 16px;
+  }
+  .profile p { font-size: 15px; line-height: 1.55; margin-bottom: 12px; }
+  .profile ul { font-size: 14px; padding-left: 1.05em; }
+  .profile ul li { margin-bottom: 4px; }
+
+  /* ---- pull quote ---- */
+  .pullquote {
+    margin: 64px 0 32px;
+    padding: 32px 0;
+    border-top: 2px solid var(--rule);
+    border-bottom: 2px solid var(--rule);
+  }
+  .pullquote blockquote {
+    font-family: "EB Garamond", "Garamond", serif;
+    font-weight: 400;
+    font-style: italic;
+    font-size: clamp(28px, 4.2vw, 60px);
+    line-height: 1.12;
+    letter-spacing: -0.005em;
+    margin: 0;
+    max-width: 22ch;
+  }
+  .pullquote blockquote .mark {
+    color: var(--accent);
+    font-weight: 600;
+    font-style: italic;
+  }
+  .pullquote .cite {
+    margin-top: 20px;
+    font-size: 11px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  /* ---- one-liner summary strip ---- */
+  .one-liners {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    margin-top: 32px;
+  }
+  @media (max-width: 840px) { .one-liners { grid-template-columns: 1fr; } }
+  .one-liner {
+    border-top: 3px solid var(--rule);
+    padding-top: 14px;
+  }
+  .one-liner .who {
+    font-family: "Inter", sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .one-liner .quote {
+    font-family: "EB Garamond", "Garamond", serif;
+    font-weight: 500;
+    font-style: italic;
+    font-size: 24px;
+    line-height: 1.28;
+    margin: 0 0 8px;
+    color: var(--ink);
+  }
+  .one-liner .tag {
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* ---- footer colophon ---- */
+  footer {
+    margin-top: 96px;
+    border-top: 4px solid var(--rule);
+    padding-top: 18px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  footer .logo {
+    font-family: "EB Garamond", "Garamond", serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 16px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--ink);
+  }
+
+  /* little corrections / quotes block treatment */
+  .quotes-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .quotes-list li {
+    padding: 10px 0;
+    border-top: 1px dashed var(--divider);
+    font-size: 14px;
+  }
+  .quotes-list li:first-child { border-top: none; }
+  .quotes-list time {
+    display: inline-block;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--muted);
+    min-width: 11ch;
+    margin-right: 10px;
+  }
+  .quotes-list q {
+    font-family: "EB Garamond", "Garamond", serif;
+    font-style: italic;
+    font-weight: 500;
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<main class="page">
+<div class="masthead">
+  <div class="vol">Vol. I · No. 01 · 2026</div>
+  <div class="logo">The Ink Path</div>
+  <div class="vol">Field Notes Edition</div>
+</div>
+
+<div class="kicker">Field Engineering · reMarkable 2</div>
+<h1 class="display">Ink at eight <em>milliseconds</em>.</h1>
+<p class="deck">pi-collab was built on a reasonable assumption: a third-party app can never match the notebook's pen latency, because xochitl keeps its optimized stack to itself and everyone else goes through sockets. riddle now matches it — over a socket. The assumption named the wrong suspect.</p>
+
+<div class="byline">
+  <div>By <b>Claude (Fable 5)</b></div>
+  <div>Subject <b>pi-collab vs. riddle</b></div>
+  <div>Corpus <b>two codebases, one tablet</b></div>
+  <div>Filed <b>July 7, 2026</b></div>
+</div>
+
+<section>
+  <h2 class="section"><span class="num">I.</span>Two apps, one assumption</h2>
+  <div class="section-rule"></div>
+  <p class="lede">Both apps live on the same reMarkable&nbsp;2, both were written in Rust by the same author's sessions, and both read the pen the same way: straight off the Wacom digitizer as raw evdev, full 4096-level pressure, axes swapped and inverted with the exact transform the community reverse-engineered years ago. <code>pi-collab</code> is a handwriting chat — you write in a strip at the bottom, tap <b>SEND</b>, and your ink rides to a headless <code>pi</code> agent as a PNG. <code>riddle</code> is an enchanted diary — you write, rest the pen, and the page drinks your ink before answering in a flowing hand. Up to the moment a pixel needs to reach glass, they are siblings.</p>
+  <p>After that moment they part company completely. When pi-collab was built, the ceiling seemed obvious: reMarkable's own notebook draws through xochitl's <em>in-process</em> engine, while an AppLoad app draws through a shared framebuffer and a socket into someone else's render loop. Sockets versus the vendor's private fast path — surely no contest. That framing survived until riddle's takeover mode landed and matched the notebook stroke for stroke, without abandoning the socket.</p>
+</section>
+
+<section>
+  <h2 class="section"><span class="num">II.</span>The machine underneath</h2>
+  <div class="section-rule"></div>
+  <p>To see why the socket was framed, you have to see what this tablet actually runs. The reMarkable&nbsp;2 is an NXP i.MX7Dual — two Cortex-A7 cores, about 1&nbsp;GB of RAM — and, crucially, a SoC with <em>no e-ink controller block</em>. Its predecessor's i.MX6 SoloLite had a hardware EPDC that turned pixel buffers into panel waveforms on its own; the rM2's panel hangs off a plain parallel display interface instead. Every waveform this device has ever drawn was computed by ordinary CPU threads. The "display controller" is a program — which is the single fact this whole story turns on, because programs can be relocated, reimplemented, or borrowed.</p>
+  <p>Above the silicon sits a Yocto-built embedded Linux — kernel 5.4.70 on this unit, <code>systemd</code> as init (with <code>logind</code> handling power), a BusyBox userland thin enough that <code>timeout</code> doesn't exist and <code>head</code> rejects its own common flags, and glibc underneath it all. There is no display server. No X11, no Wayland, no compositor arbitrating windows — nothing between an application and <code>/dev/fb0</code> but intent. Input is raw kernel evdev: <code>event0</code> is the power key, <code>event1</code> the Wacom I2C pen digitizer (hover, tilt, 4096 pressure levels at hardware rate), <code>event2</code> the capacitive touch panel. Any root process may open them; the "input stack" is a <code>read()</code> loop.</p>
+  <p>Into that vacuum reMarkable ships exactly one program: <code>xochitl</code>, a monolithic Qt&nbsp;6/QML application that is simultaneously the document library, the notebook editor, the cloud sync client, the Wi-Fi settings panel, the input reader — and, on this device, the display driver itself, hosting the SWTCON threads that drive the panel. It is not <em>an</em> app on a desktop; it is the desktop, the window system, and the graphics card's firmware, fused. Since OS&nbsp;3.20 one load-bearing organ of it lives in a separate scene-graph plugin, <code>libqsgepaper.so</code> — a detail that becomes the entire plot of section&nbsp;V.</p>
+  <p>The disk layout explains how a hacked device survives: two small A/B root partitions (~256&nbsp;MB, swapped wholesale on OTA updates — ours sits 91% full) and a 6.4&nbsp;GB <code>/home</code> that persists. Everything the community adds lives in <code>/home/root</code>; everything reMarkable owns gets replaced under it. The modern mod stack rides that line: <code>xovi</code> injects extension <code>.so</code>s into xochitl at launch, <code>qt-resource-rebuilder</code> patches its QML resources in memory, and <code>AppLoad</code> adds a launcher whose <code>qtfb</code> backend rents guest apps a shared-memory framebuffer inside xochitl's own scene. That rented window is where pi-collab lives — and the rent, it turns out, is paid in milliseconds.</p>
+
+  <div class="tbl-wrap">
+  <table class="data">
+    <caption>The reMarkable 2 software stack, bottom to top</caption>
+    <thead><tr><th>Layer</th><th>Component</th><th>Role in the ink path</th></tr></thead>
+    <tbody>
+      <tr><th>Silicon</th><td>i.MX7D · 2× Cortex-A7</td><td>no EPDC block — waveforms are software's problem</td></tr>
+      <tr><th>Kernel</th><td>Linux 5.4.70 (Yocto)</td><td>evdev input, plain framebuffer, suspend-to-RAM</td></tr>
+      <tr><th>Init</th><td>systemd + logind</td><td>services, power; riddle detaches via <code>systemd-run</code></td></tr>
+      <tr><th>Userland</th><td>BusyBox + glibc</td><td>minimal shell world; SSH root access is stock</td></tr>
+      <tr><th>UI</th><td>xochitl (Qt 6 / QML)</td><td>the only program: documents, sync, input — and the panel driver</td></tr>
+      <tr><th>Engine</th><td>libqsgepaper.so</td><td>SWTCON generator + vsync threads, exported since 3.20</td></tr>
+      <tr><th>Mod layer</th><td>xovi · qt-resource-rebuilder · AppLoad</td><td>.so injection into xochitl; qtfb windows for guests</td></tr>
+      <tr><th>Guests</th><td>pi · pi-collab · riddle</td><td>root processes, raw evdev, qtfb tenants — or usurpers</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2 class="section"><span class="num">III.</span>Anatomy of the middleman</h2>
+  <div class="section-rule"></div>
+  <p>The windowed path both apps started on is AppLoad's <code>qtfb</code>: the app draws RGB565 into a shared-memory buffer, then sends a small update message over a Unix socket. Inside xochitl, a plugin marks a Qt scene item dirty; Qt repaints the buffer into its scene on its own schedule; xochitl's e-ink backend then selects a waveform and queues the region for the panel. Every hop is cheap. The <em>scheduling</em> between hops is not.</p>
+  <p>What makes the assumption interesting is that pi-collab did everything right on its side of the socket. It coalesces ink flushes to 12&nbsp;ms — more aggressive than riddle's original 35. It requests the UltraFast waveform; its own source calls the refresh mode "THE latency lever." It rejects palms, reads the digitizer directly, throttles the big conversation region separately (110&nbsp;ms) so it never starves the ink. None of it was enough, because the lever that matters sits on the far side of the socket. When riddle's windowed build dropped its flush interval from 35&nbsp;ms to 15, the author's on-device verdict came back unmoved: <q>hmmm quite slow still…</q></p>
+  <p>The socket crossing itself is microseconds. The milliseconds live on the other side, in a render loop nobody outside xochitl controls.</p>
+
+  <div class="tbl-wrap">
+  <table class="data">
+    <caption>The windowed (qtfb) pipeline, hop by hop</caption>
+    <thead><tr><th>Hop</th><th>Owner</th><th class="num">Order of cost</th></tr></thead>
+    <tbody>
+      <tr><th>Pen evdev → app surface draw</th><td>app</td><td class="num">µs</td></tr>
+      <tr><th>Client-side ink coalescing</th><td>app</td><td class="num">12–35 ms budget</td></tr>
+      <tr><th>Socket message → qtfb plugin</th><td>kernel</td><td class="num">µs</td></tr>
+      <tr><th>Dirty-mark → next Qt render pass</th><td>xochitl</td><td class="num">frame-scheduled</td></tr>
+      <tr><th>Scene repaint + waveform selection</th><td>xochitl</td><td class="num">ms, opaque</td></tr>
+      <tr><th>SWTCON drives the panel</th><td>xochitl</td><td class="num">panel physics</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<div class="pullquote">
+  <blockquote>The socket crossing itself is microseconds. The milliseconds live <span class="mark">on the other side</span>.</blockquote>
+  <div class="cite">— Section III</div>
+</div>
+
+<section>
+  <h2 class="section"><span class="num">IV.</span>What the notebook knows</h2>
+  <div class="section-rule"></div>
+  <p>xochitl's own canvas never negotiates with a scene graph for its ink. Because the rM2 has no hardware e-ink controller, a <em>software</em> TCON drives the panel from CPU threads — a generator computing waveform phases against a per-temperature table, a vsync thread feeding the panel. Pen strokes get a dedicated DU (direct-update, near-binary) waveform in a priority mode that jumps the queue. That is the entire moat: not a faster transport, but a private engine with a private scheduler.</p>
+  <p>For years that engine was compiled into the xochitl binary itself. The original <code>rm2fb</code> project chased its function addresses release by release and stalled at OS&nbsp;3.3 in early 2024 — which is why takeover looked dead for anyone on modern firmware. Then reMarkable did the community an accidental favor: from OS&nbsp;3.20 the engine moved into <code>libqsgepaper.so</code> — a plugin, with <em>exported symbols</em>: <code>EPFramebufferSwtcon::initialize</code>, <code>::update</code>, <code>::shutdown</code>. The same library riddle's quill backend interposes on the Paper&nbsp;Pro. The moat became a loadable library.</p>
+</section>
+
+<section>
+  <h2 class="section"><span class="num">V.</span>The heist</h2>
+  <div class="section-rule"></div>
+  <p>The instrument is timower/rM2-stuff's rewritten <code>rm2fb</code> server. It <code>dlopen</code>s the vendor plugin and calls its exported initializer — hooking <code>malloc</code>/<code>calloc</code> for the duration so the engine's framebuffer allocation lands in shared memory (<code>/dev/shm/swtfb.01</code>) where clients can draw. Three unexported internals (lock, update, unlock) are resolved as offsets from the exported <code>::update</code> symbol, keyed by the library's GNU build&nbsp;ID. On this tablet — OS&nbsp;3.24.0.149, past anything in the project's README — the build ID extracted over SSH matched the 3.23.0.54 entry byte for byte. The prebuilt release binary worked untouched, first try.</p>
+  <p>riddle's takeover script stops xochitl (with a <code>trap</code> that always restarts it), hosts that server from its own app folder, and then speaks the plainest protocol of this whole story: one raw 32-byte <code>UpdateParams</code> struct per dirty region, over a Unix stream socket, answered by a single bool byte. The ack makes every update synchronous — backpressure for free, no client-side coalescing needed beyond an 8&nbsp;ms cadence. Ink is sent as DU with the priority flag, which the server maps onto <em>xochitl's own pen mode</em>. It is, pointedly, still sockets.</p>
+  <p>Measured on-device with a bar-sweep diagnostic: 24 fast updates in 921&nbsp;ms, of which 720&nbsp;ms were deliberate sleeps — roughly <em>eight milliseconds</em> per synchronous update round-trip, engine kick included. The author's verdict this time: <q>AMAZING this works.</q></p>
+
+  <div class="tbl-wrap">
+  <table class="data">
+    <caption>The takeover pipeline — same socket, no middleman</caption>
+    <thead><tr><th>Hop</th><th>Owner</th><th class="num">Order of cost</th></tr></thead>
+    <tbody>
+      <tr><th>Pen evdev → app surface draw</th><td>app</td><td class="num">µs</td></tr>
+      <tr><th>32-byte update → stream socket</th><td>kernel</td><td class="num">µs</td></tr>
+      <tr><th>lock → engine update → unlock</th><td>vendor engine</td><td class="num">~8 ms round-trip</td></tr>
+      <tr><th>DU waveform, pen-priority mode</th><td>vendor engine</td><td class="num">panel physics</td></tr>
+      <tr><th>Qt render pass</th><td class="zero">—</td><td class="num zero">removed</td></tr>
+      <tr><th>Compositor / scene graph</th><td class="zero">—</td><td class="num zero">removed</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<div class="pullquote">
+  <blockquote>The fast path isn't a faster pipe. It's <span class="mark">fewer opinions</span> between the pen and the panel.</blockquote>
+  <div class="cite">— Section V</div>
+</div>
+
+<section>
+  <h2 class="section"><span class="num">VI.</span>The bill</h2>
+  <div class="section-rule"></div>
+  <p>Nothing here is free. Takeover is <em>exclusive</em>: xochitl is stopped for exactly as long as the diary is open, so the app must own everything it touched — a five-finger tap to exit, the power button remapped to a sleep page (with the kernel's <code>suspend_stats</code> counter as the authoritative "we actually slept" signal, and a Wi-Fi re-association nudge on wake), a systemd transient unit so the launcher's death can't orphan the session, and a restore trap for every exit path. It is also <em>coupled</em>: those three function offsets are keyed to a build ID, so a future OS update can orphan takeover mode until rM2-stuff maps the new library — while the windowed path, for all its lag, survives updates untouched. Both modes ship in the same binary; the launch environment picks.</p>
+  <p>And the assumption? It was half right. xochitl's stack <em>is</em> optimized, and no amount of client-side tuning reaches it from a window. The half that was wrong is that sockets were ever the reason. pi-collab's pen plumbing is already identical to riddle's; the same server sits one <code>dlopen</code> away. Whether a chat app wants to own the whole panel is a design question now — not a physics one.</p>
+
+  <div class="profiles">
+    <div class="profile">
+      <div class="label">pi-collab · windowed</div>
+      <h3>The diplomat</h3>
+      <p class="sub">Coexists with xochitl; draws in AppLoad's window.</p>
+      <p>Direct Wacom pen, palm rejection, 12&nbsp;ms ink flush, UltraFast waveform hint.</p>
+      <ul>
+        <li>Survives OS updates</li>
+        <li>Scroll, buttons, system UI intact</li>
+        <li>Latency capped by Qt's repaint</li>
+      </ul>
+    </div>
+    <div class="profile">
+      <div class="label">riddle · windowed</div>
+      <h3>The tuner</h3>
+      <p class="sub">Same path, flush dropped 35 → 15 ms, env-tunable.</p>
+      <p>Proved the client-side floor: past ~15&nbsp;ms, nothing an app does moves the needle.</p>
+      <ul>
+        <li><code>RIDDLE_FLUSH_MS</code> knob, no rebuild</li>
+        <li>Verdict: "quite slow still"</li>
+        <li>Kept as the safe fallback</li>
+      </ul>
+    </div>
+    <div class="profile">
+      <div class="label">riddle · takeover</div>
+      <h3>The thief</h3>
+      <p class="sub">xochitl stopped; vendor engine hosted in-app-folder.</p>
+      <p>32-byte updates, 1-byte acks, DU pen mode — ~8&nbsp;ms per synchronous update.</p>
+      <ul>
+        <li>Notebook-class ink</li>
+        <li>Build-ID coupled to firmware</li>
+        <li>Trap-guaranteed xochitl restore</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="section"><span class="num">VII.</span>Takeaways</h2>
+  <div class="section-rule"></div>
+  <div class="one-liners">
+    <div class="one-liner">
+      <div class="who">The Transport</div>
+      <p class="quote">"Blame the scheduler, not the socket."</p>
+      <div class="tag">µs crossings · frame-paced repaints</div>
+    </div>
+    <div class="one-liner">
+      <div class="who">The Engine</div>
+      <p class="quote">"Since OS 3.20 the notebook's ink engine ships as a library. dlopen is the loading dock."</p>
+      <div class="tag">libqsgepaper.so · exported symbols · build IDs</div>
+    </div>
+    <div class="one-liner">
+      <div class="who">The Trade</div>
+      <p class="quote">"Instant ink costs you xochitl — for exactly as long as the diary is open."</p>
+      <div class="tag">exclusive panel · restore trap · 5-finger exit</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div>Sources · <span class="mono">~/work/projects/Remarkable/pi-collab</span> · <span class="mono">swairshah/riddle</span> · <span class="mono">timower/rM2-stuff</span></div>
+  <div class="logo">The Ink Path</div>
+  <div>End of report</div>
+</footer>
+  </main>
+  <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle light or dark theme" title="Toggle light / dark">◐</button>
+  <script>
+    /* Manual light/dark override. Default (no data-theme) follows the OS via
+       prefers-color-scheme; clicking sets an explicit theme and remembers it. */
+    (function () {
+      var root = document.documentElement;
+      var mq = window.matchMedia("(prefers-color-scheme: dark)");
+      var btn = document.getElementById("themeToggle");
+      btn.addEventListener("click", function () {
+        var cur = root.getAttribute("data-theme");
+        var isDark = cur ? cur === "dark" : mq.matches;
+        var next = isDark ? "light" : "dark";
+        root.setAttribute("data-theme", next);
+        try { localStorage.setItem("magazine-theme", next); } catch (e) {}
+      });
+    })();
+  </script>
+</body>
+</html>
